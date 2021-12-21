@@ -62,7 +62,7 @@ class PATEGAN(BaseModel):
         update = []
         for l in l_list:
             clip = 2 * square(lap_scale) * l * (l + 1)
-            t = (1 - q) * pow((1 - q) / (1 - exp(2*lap_scale) * q), l) + q * exp(2 * lap_scale * l)
+            t = (1 - q) * pow((1 - q) / (1 - exp(2 * lap_scale) * q), l) + q * exp(2 * lap_scale * l)
             update.append(reduce_sum(clip_by_value(t, clip_value_min=-clip, clip_value_max=clip)))
         return cast(update, dtype=float64)
 
@@ -121,23 +121,23 @@ class PATEGAN(BaseModel):
                 for i in range(self.n_teachers):
                     inputs, categories = None, None
                     for b, data_ in enumerate(train_loader[i]):
-                        inputs, categories = data_, b
+                        inputs, categories = data_, b  # categories = 0, data_ holds the first batch, why do we do this?
                         #categories will give zero value in each loop as the loop break after running the first time
                         #inputs will have only the first batch of data
                         break
 
                     with GradientTape() as disc_tape:
                         # train with real
-                        dis_data = concat([inputs, zeros([inputs.shape[0], 1], dtype=float64)], 1)
+                        dis_data = concat([inputs, zeros((self.batch_size, 1), dtype=float64)], 1)  # Why do we append a column of zeros instead of categories?
                         # print("1st batch data", dis_data.shape)
                         real_output = self.t_discriminators[i](dis_data, training=True)
                         # print(real_output.shape, tf.ones.shape)
 
                         # train with fake
-                        z = uniform([inputs.shape[0], self.z_dim], dtype=float64)
+                        z = uniform([self.batch_size, self.noise_dim], dtype=float64)
                         # print("uniformly distributed noise", z.shape)
 
-                        sample = expand_dims(category_samples.sample(inputs.shape[0]), axis=1)
+                        sample = expand_dims(category_samples.sample(self.batch_size), axis=1)
                         # print("category", sample.shape)
 
                         fake = self.generator(concat([z, sample], 1))
@@ -153,16 +153,16 @@ class PATEGAN(BaseModel):
                         disc_loss = real_loss_disc + fake_loss_disc
                         # print(disc_loss, real_loss_disc, fake_loss_disc)
 
-                        gradients_of_discriminator = disc_tape.gradient(disc_loss, self.t_discriminators[i].trainable_variables)
+                        disc_grad = disc_tape.gradient(disc_loss, self.t_discriminators[i].trainable_variables)
                         # print(gradients_of_discriminator)
 
-                        disc_opt_t[i].apply_gradients(zip(gradients_of_discriminator, self.t_discriminators[i].trainable_variables))
+                        disc_opt_t[i].apply_gradients(zip(disc_grad, self.t_discriminators[i].trainable_variables))
 
             # train the student discriminator
             for t_3 in range(train_arguments.num_student_iters):
-                z = uniform([inputs.shape[0], self.z_dim], dtype=float64)
+                z = uniform([self.batch_size, self.noise_dim], dtype=float64)
 
-                sample = expand_dims(category_samples.sample(inputs.shape[0]), axis=1)
+                sample = expand_dims(category_samples.sample(self.batch_size), axis=1)
                 # print("category_stu", sample.shape)
 
                 with GradientTape() as stu_tape:
@@ -185,9 +185,9 @@ class PATEGAN(BaseModel):
                     disc_opt_stu.apply_gradients(zip(gradients_of_stu, self.s_discriminator.trainable_variables))
 
             # train the generator
-            z = uniform([inputs.shape[0], self.z_dim], dtype=float64)
+            z = uniform([self.batch_size, self.noise_dim], dtype=float64)
 
-            sample_g = expand_dims(category_samples.sample(inputs.shape[0]), axis=1)
+            sample_g = expand_dims(category_samples.sample(self.batch_size), axis=1)
 
             with GradientTape() as gen_tape:
                 fake = self.generator(concat([z, sample_g], 1))
@@ -198,8 +198,8 @@ class PATEGAN(BaseModel):
                 generator_optimizer.apply_gradients(zip(gradients_of_generator, self.generator.trainable_variables))
 
             # Calculate the current privacy cost
-            epsilon = min((alpha - log(self.delta)) / l_list)
-            if steps % 1 == 0:
+            epsilon = min((alpha - log(train_arguments.delta)) / l_list)
+            if steps % train_arguments.sample_interval == 0:
                 print("Step : ", steps, "Loss SD : ", stu_loss, "Loss G : ", loss_gen, "Epsilon : ", epsilon)
 
             steps += 1
@@ -208,7 +208,7 @@ class PATEGAN(BaseModel):
     def _pate_voting(self, data, netTD, lap_scale):
         # TODO: Validate the logic against original article
         ## Faz os votos dos teachers (1/0) netTD para cada record em data e guarda em results
-        results = zeros([len(netTD), data.shape[0]], dtype=int64)
+        results = zeros([len(netTD), self.batch_size], dtype=int64)
         # print(results)
         for i in range(len(netTD)):
             output = netTD[i](data, training=True)
