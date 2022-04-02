@@ -11,6 +11,7 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.losses import BinaryCrossentropy, MeanSquaredError
 
 import numpy as np
+import os
 from tqdm import tqdm, trange
 
 from ydata_synthetic.synthesizers.gan import BaseModel
@@ -37,11 +38,16 @@ class TimeGAN(BaseModel):
 
     __MODEL__='TimeGAN'
 
-    def __init__(self, model_parameters, hidden_dim, seq_len, n_seq, gamma):
+    def __init__(self, model_parameters, hidden_dim, seq_len, n_seq, gamma, model_base_path):
         self.seq_len=seq_len
         self.n_seq=n_seq
         self.hidden_dim=hidden_dim
         self.gamma=gamma
+        self.save_epochs = 1000
+        print(f"Save epochs: {self.save_epochs}")
+
+        self.base_path = model_base_path
+        os.makedirs(self.base_path, exist_ok=True)
         super().__init__(model_parameters)
 
     def define_gan(self):
@@ -231,15 +237,39 @@ class TimeGAN(BaseModel):
 
         ## Embedding network training
         autoencoder_opt = Adam(learning_rate=self.g_lr)
-        for _ in tqdm(range(train_steps), desc='Emddeding network training'):
+        for i in tqdm(range(train_steps), desc='Emddeding network training'):
             X_ = next(self.get_batch_data(data, n_windows=len(data)))
             step_e_loss_t0 = self.train_autoencoder(X_, autoencoder_opt)
 
+            if i % self.save_epochs == 0:
+                autoencoder_path = os.path.join(self.base_path, "autoencoder")
+                os.makedirs(autoencoder_path, exist_ok=True)
+                model_path = os.path.join(autoencoder_path, f"{self.seq_len}_{i}.pkl")
+
+                print(f"Saving autoencoder checkpoint {i} to {model_path}")
+                self.save(model_path)
+
+        model_path = os.path.join(autoencoder_path, f"{self.seq_len}_{train_steps}.pkl")
+        print(f"Saving autoencoder checkpoint {train_steps} to {model_path}")
+        self.save(model_path)
+
         ## Supervised Network training
         supervisor_opt = Adam(learning_rate=self.g_lr)
-        for _ in tqdm(range(train_steps), desc='Supervised network training'):
+        for i in tqdm(range(train_steps), desc='Supervised network training'):
             X_ = next(self.get_batch_data(data, n_windows=len(data)))
             step_g_loss_s = self.train_supervisor(X_, supervisor_opt)
+
+            if i % self.save_epochs == 0:
+                supervisor_path = os.path.join(self.base_path, "supervisor")
+                os.makedirs(supervisor_path, exist_ok=True)
+                model_path = os.path.join(supervisor_path, f"{self.seq_len}_{i}.pkl")
+
+                print(f"Saving supervisor checkpoint {i} to {model_path}")
+                self.save(model_path)
+
+        model_path = os.path.join(supervisor_path, f"{self.seq_len}_{train_steps}.pkl")
+        print(f"Saving supervisor checkpoint {train_steps} to {model_path}")
+        self.save(model_path)
 
         ## Joint training
         generator_opt = Adam(learning_rate=self.g_lr)
@@ -247,7 +277,7 @@ class TimeGAN(BaseModel):
         discriminator_opt = Adam(learning_rate=self.d_lr)
 
         step_g_loss_u = step_g_loss_s = step_g_loss_v = step_e_loss_t0 = step_d_loss = 0
-        for _ in tqdm(range(train_steps), desc='Joint networks training'):
+        for i in tqdm(range(train_steps), desc='Joint networks training'):
 
             #Train the generator (k times as often as the discriminator)
             # Here k=2
@@ -269,6 +299,18 @@ class TimeGAN(BaseModel):
             step_d_loss = self.discriminator_loss(X_, Z_)
             if step_d_loss > 0.15:
                 step_d_loss = self.train_discriminator(X_, Z_, discriminator_opt)
+
+            if i % self.save_epochs == 0:
+                joint_path = os.path.join(self.base_path, "joint")
+                os.makedirs(joint_path, exist_ok=True)
+                model_path = os.path.join(joint_path, f"{self.seq_len}_{i}.pkl")
+
+                print(f"Saving joint checkpoint {i} to {model_path}")
+                self.save(model_path)
+
+        model_path = os.path.join(joint_path, f"{self.seq_len}_{train_steps}.pkl")
+        print(f"Saving joint checkpoint {train_steps} to {model_path}")
+        self.save(model_path)
 
     def sample(self, n_samples):
         steps = n_samples // self.batch_size + 1

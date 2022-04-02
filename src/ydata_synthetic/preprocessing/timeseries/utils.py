@@ -16,7 +16,8 @@ def real_data_loading(data: np.array, seq_len):
       - data: preprocessed data.
     """
     # Flip the data to make chronological data
-    ori_data = data[::-1]
+    print(f"Data should already be chronological")
+    ori_data = data
     # Normalize the data
     scaler = MinMaxScaler().fit(ori_data)
     ori_data = scaler.transform(ori_data)
